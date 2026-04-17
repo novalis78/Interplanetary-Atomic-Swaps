@@ -1,0 +1,489 @@
+\documentclass[11pt]{article}
+
+% ---- Packages ----
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+\usepackage{natbib}
+\bibliographystyle{plainnat}
+\usepackage{authblk}
+\usepackage{enumitem}
+\setlist{nosep,leftmargin=*}
+\usepackage{listings}
+\usepackage{array}
+
+% ---- Code listing style ----
+\definecolor{codebg}{RGB}{245,245,245}
+\definecolor{codekw}{RGB}{0,85,120}
+\definecolor{codestr}{RGB}{120,40,40}
+\definecolor{codecom}{RGB}{90,120,60}
+\lstdefinestyle{ipasstyle}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecom}\itshape,
+  stringstyle=\color{codestr},
+  showstringspaces=false,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{codebg!60!black},
+  xleftmargin=4pt,
+  framexleftmargin=4pt,
+  framexrightmargin=4pt,
+  aboveskip=8pt,
+  belowskip=6pt,
+}
+\lstset{style=ipasstyle}
+
+% ---- Metadata ----
+\title{\textbf{InterPlanetary Atomic Swaps (IPAS):\\
+  On-Chain Hash Time-Locked Contracts as a Settlement\\
+  Primitive for the Earth--Mars Economy}}
+\author[1]{Lennart Lopin\thanks{Correspondence: \texttt{lennart@marscoin.org}. %
+  ORCID: 0009-0001-2751-2060.}}
+\affil[1]{Marscoin Foundation}
+\date{April 2026}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+% =============================================================================
+\begin{abstract}
+\noindent
+Every financial transaction in human history has occurred within a single light-speed boundary. Mars breaks that assumption. The 3--22 minute one-way communication delay, together with approximately two-week solar conjunction blackouts every 26 months, makes centralised exchanges, custodial bridges, and synchronous settlement infrastructures structurally unviable for Earth--Mars commerce. We argue that the correct primitive already exists and has, in fact, existed since 2013: the on-chain Hash Time-Locked Contract (HTLC). We call its interplanetary specialisation the \emph{InterPlanetary Atomic Swap} (IPAS). The cryptographic atomicity of an HTLC --- either both parties complete or both refund --- is distance-agnostic: the hash does not know what planet its preimage was revealed on, and block-height timelocks do not require the two chains' wall clocks to agree. The operational safety of an HTLC, however, is distance-sensitive: refund windows, monitoring latency, fee-spike buffers, and conjunction handling must all be sized against the physics of the link. We present (i) a systems model for two independent planetary monetary domains linked only by delayed cross-chain observation; (ii) a formal timeout-sizing inequality with numerical values for close, average, far, and conjunction-spanning orbital regimes; (iii) the \emph{destination-address} construction that turns a bilateral swap into a three-party commerce primitive without introducing a third trusted role; (iv) a bandwidth analysis showing that maintaining delayed mirrors of each other's chains is well within the communication budget of any human Mars settlement; and (v) a critical comparison with the Lightning-based interplanetary proposal of \citet{puente2025}, arguing that on-chain HTLC swaps are simpler, more transparent, more custody-free, and better suited to the Mars case than any off-chain payment-channel construction. The paper is anchored to an existence proof: on 12 April 2026, the Marscoin Foundation completed the first mainnet BTC$\leftrightarrow$MARS atomic swap using 4h/8h terrestrial timelocks. IPAS extends those parameters --- a configuration change, not a protocol change --- to 72h/144h for Earth--Mars average distance and to multi-week windows across conjunction. For a civilisation in which physical cargo takes months to cross between planets, a six-day financial settlement is effectively instant.
+\end{abstract}
+
+\smallskip
+\noindent\textbf{Keywords:} atomic swaps, HTLC, Marscoin, Bitcoin, interplanetary commerce, delay-tolerant settlement, Mars economy, solar conjunction, content-addressed settlement.
+
+% =============================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Consider a colonist on Mars who needs a replacement turbopump for a life-support recycler. The supplier is on Earth; the colonist holds Marscoin (MARS); the supplier prices the part in Bitcoin (BTC). A conventional wire transfer requires a correspondent bank that does not exist. A credit-card rail requires an issuer network with merchant-acquirer relationships that do not exist. A centralised cryptocurrency exchange requires a matching engine whose order-acknowledgement loop exceeds the 6--44 minute Earth--Mars round-trip by design. A custodial bridge requires depositing funds with an intermediary 225 million kilometres away, through a communication channel that goes dark for two weeks every 26 months. Every piece of the terrestrial payment stack fails.
+
+What works --- what \emph{already} works on mainnet, today, on Earth --- is an instrument that was designed for an entirely different purpose and happens, almost accidentally, to be the correct primitive for interplanetary value transfer: the on-chain Hash Time-Locked Contract \citep{nolan2013, todd2014cltv}. An HTLC locks funds on two chains against the same secret hash, with asymmetric refund timers that guarantee either both parties complete or both refund. It does not require synchronous clocks, a trusted custodian, a payment network operator, or continuous connectivity. It requires only that each chain can eventually be observed.
+
+The central claim of this paper is that HTLCs are \emph{accidentally interplanetary}. The properties that make them work for BTC$\leftrightarrow$LTC swaps in 2017 are the same properties that make them work for BTC$\leftrightarrow$MARS swaps in 2040. The hash does not degrade with distance. The timelock uses block height, not wall-clock time. The preimage, once revealed on one chain, proves the condition on the other chain in exactly the same way whether the observer detected it in three minutes or twenty-two. The only adaptation required is a parameter change: refund timers extended from hours to days or weeks to absorb light-speed propagation, block-inclusion variance, operational response, and, if needed, conjunction blackout.
+
+We call this construction the \emph{InterPlanetary Atomic Swap}, IPAS. The name deliberately echoes IPFS \citep{ipfs2014}: just as IPFS retrieves content by hash rather than by server location, IPAS \emph{settles} value by hash rather than by synchronous ledger state. In both cases, cryptography overcomes distance.
+
+\paragraph{An existence proof.}
+On 12 April 2026, the Marscoin Foundation completed the first mainnet atomic swap between Bitcoin and Marscoin using terrestrial-parameter HTLCs \citep{marscoin2026firstswap}. The swap employed a 4-hour BTC timelock and an 8-hour MARS timelock, followed the classical asymmetry rule, and settled without intermediaries. IPAS as described in this paper is not a new protocol; it is the same protocol, with the timelocks widened to absorb the Earth--Mars link budget. The work is not prospective cryptography --- it is parameter selection and operational engineering on a primitive that has been proven in production.
+
+\paragraph{A historical coincidence worth naming.}
+Tier Nolan posted the atomic-swap construction to BitcoinTalk in May 2013. In the same months, a different Bitcoin-adjacent community --- the early Marscoin contributors, the present author among them --- was discussing whether a Mars colony would need its own chain, and specifically whether such a chain should have ``slower blocks for a slower planet'' so that the chain rhythm matched the communication link \citep{lopin2014marscoin}. Neither community knew it was building half of the same mechanism. The Marscoin side specified the \emph{local chain}; the atomic-swap side specified the \emph{bridge}. Thirteen years later, the two halves fit. IPAS is what happens when you put them together.
+
+\paragraph{Contribution.}
+This paper makes five contributions. First, we formalise a two-domain systems model in which Earth and Mars each maintain a locally-validating chain and observe the other only through delayed cross-chain mirrors (Section~\ref{sec:model}). Second, we present the IPAS protocol itself, including the \emph{destination-address construction} that turns a bilateral swap into a three-party commerce primitive without a third trusted role (Section~\ref{sec:ipas}). Third, we derive a timeout-sizing inequality for the Earth--Mars link and supply numerical parameter tables for four orbital regimes (Section~\ref{sec:timeouts}). Fourth, we bound the bandwidth required for delayed-mirror operation, showing that a Mars settlement can track Bitcoin in approximately 9\,MB/hour --- trivial for any human-habitable communication link (Section~\ref{sec:infra}). Fifth, we compare IPAS critically with the Lightning-based interplanetary proposal of \citet{puente2025}, arguing that on-chain HTLCs are strictly simpler, more transparent, more custody-free, and better aligned with the Mars case than off-chain payment channels (Section~\ref{sec:lightning}). Sections~\ref{sec:economics}--\ref{sec:politics} develop the economic and political-economic implications, and Section~\ref{sec:conclusion} concludes.
+
+% =============================================================================
+\section{Related Work and Historical Context}
+\label{sec:related}
+
+\subsection{HTLCs, atomic swaps, and payment channels}
+
+The cryptographic foundation is settled. \citet{nolan2013} described the HTLC-based cross-chain swap on BitcoinTalk in May 2013. BIP~65 \citep{todd2014cltv} introduced \texttt{OP\_CHECKLOCKTIMEVERIFY}, the opcode that made HTLCs practical in Bitcoin Script. BIP~112 \citep{harding2016op} added \texttt{OP\_CHECKSEQUENCEVERIFY} for relative locktimes. The Decred project released the first widely-used implementation in 2017 \citep{decred2017}. \citet{poon2016lightning} generalised HTLCs into routed contingent payments, creating the Lightning Network. \citet{gudgeon2019sok} systematised the design space, and \citet{comit2023} provides the canonical operational statement of the asymmetry rule: \emph{the party who funds second must be able to refund first}. None of this is novel. The IPAS contribution is not the HTLC; it is the deliberate re-targeting of the HTLC to interplanetary parameter ranges.
+
+\subsection{Delay-Tolerant Networking and Mars communications}
+
+The physical layer is also settled. NASA treats Delay/Disruption Tolerant Networking (DTN) as foundational for a Solar System Internet \citep{nasa2023dtn, nasa2026dtn}, with Bundle Protocol Version 7 \citep{burleigh2022bpv7} and Bundle Protocol Security \citep{birrane2022bpsec} standardised as IETF RFCs. Earth--Mars one-way light time varies from roughly 3 minutes at closest approach to approximately 22 minutes at greatest separation \citep{nasa2020spacecomms}; solar conjunction blocks direct radio communication for approximately two weeks every 26 months \citep{nasa2019conjunction}; the relay satellites currently serving surface assets \citep{nasa2026relay} already demonstrate store-and-forward operation across the Earth--Mars link. These are the physical parameters into which IPAS must fit, and they are well characterised.
+
+\subsection{Blockchain in space}
+
+\citet{defilippi2021blockchain} survey blockchain-in-space governance proposals, noting that most remain aspirational. \citet{mandl2017} explored blockchain for distributed spacecraft mission control at NASA. \citet{torky2022} proposed blockchain authentication for satellite constellations. Our work differs from all three: we do not propose blockchain for mission control or constellation security. We propose a specific cryptographic settlement primitive for interplanetary commerce, anchored in a working mainnet implementation.
+
+\subsection{The closest neighbour: interplanetary Lightning}
+
+The paper most adjacent to ours is \citet{puente2025}, \emph{Bitcoin as an Interplanetary Monetary Standard with Proof-of-Transit Timestamping}. Puente and Puente develop a Lightning-centric architecture for Earth--Mars payments, with proof-of-transit receipts, latency-aware CLTV margins, and adapted watchtower logic. Their analysis of light-time-adjusted channel parameters is rigorous, and we adopt several of their sizing intuitions in Section~\ref{sec:timeouts}.
+
+We differ substantively in two respects. First, we target the \emph{on-chain} HTLC rather than the Lightning channel. Second, we assume \emph{two local monetary domains} (Bitcoin on Earth, Marscoin on Mars) rather than a single Bitcoin monetary standard extended to Mars. Both choices are motivated in detail in Sections~\ref{sec:lightning} and~\ref{sec:politics}, but the short version is: Lightning's terrestrial operational record since 2018 does not inspire confidence that its already-complex operator, channel-balance, and watchtower assumptions will survive 22-minute light delay and 14-day blackouts. The on-chain HTLC has no operator, no channel balance, and no watchtower dependency that cannot be replaced with simple chain observation. For Mars, \emph{simpler is safer}.
+
+\subsection{Mars political economy}
+
+\citet{zubrin1995} established interplanetary commerce as central to Mars colonisation economics. The Marscoin white paper \citep{lopin2014marscoin} argued from first principles that a Mars settlement would need a local chain because light delay makes Earth-bound terrestrial consensus unviable. The Martian Republic paper \citep{lopin2022martianrepublic} extended that logic into governance and IPFS-linked civic infrastructure. \citet{haqqmisra2024} argues from a sovereignty angle that a mature Mars may need significant monetary separation from Earth. IPAS is politically neutral among these positions: it provides a mechanism for selective, trust-minimised cross-domain transfer that is compatible with full autonomy, pegged federation, or restricted interchange regimes. What the technology makes possible is a political choice.
+
+% =============================================================================
+\section{System Model}
+\label{sec:model}
+
+\subsection{Two monetary domains, not one synchronous ledger}
+
+We assume two independent monetary domains:
+\begin{itemize}
+  \item \textbf{Earth domain} $E$, with chain $C_E$ (Bitcoin in our running example);
+  \item \textbf{Mars domain} $M$, with chain $C_M$ (Marscoin in our running example).
+\end{itemize}
+
+Each chain validates locally. Neither chain depends on the other for its own consensus. Nodes in domain $E$ may observe blocks of $C_M$ only after propagation delay and relay scheduling; the reverse holds for $M$. The architecture is \emph{locally validating, cross-domain observing}.
+
+This is a deliberate design choice, not a limitation. A naive design that attempted to run a single base-layer chain across both planets would inherit the worst features of interplanetary latency in every routine transaction. Marscoin's original 2014 insight was exactly this: let each planet clear its own everyday economic life locally, and treat cross-planet settlement as a distinct, less frequent operation \citep{lopin2014marscoin}.
+
+\subsection{Actors}
+
+IPAS involves two swap participants. Unlike typical bilateral swap presentations, \emph{neither participant is required to be the ultimate beneficiary}:
+\begin{itemize}
+  \item \textbf{Maker} ($P_M$): the party who initiates the swap, typically by generating the preimage and funding the first HTLC. In our commerce scenarios, the maker is usually on Mars offering MARS.
+  \item \textbf{Taker} ($P_E$): the party who accepts the offer and funds the counter-HTLC on the other chain.
+\end{itemize}
+
+Each HTLC specifies a \emph{claim destination} --- a public key that may or may not belong to the swap participant. The claim destination can be a supplier, a family member, a governance treasury, an institution. This is the \emph{destination-address construction}, which we develop formally in Section~\ref{sec:ipas}. It is why IPAS is a commerce primitive, not merely a trading primitive.
+
+\subsection{Technical assumptions}
+
+We assume:
+\begin{enumerate}
+  \item Both $C_E$ and $C_M$ support hash-locked and time-locked script (native for Bitcoin and Litecoin-derived chains including Marscoin).
+  \item Cross-domain observation is \emph{delayed but eventually consistent} under honest relay.
+  \item Relay infrastructure may use DTN-style store-and-forward transport.
+  \item Participants may run automated monitoring workers but are not assumed to operate proprietary watchtower networks.
+  \item No wall-clock synchronisation between planets is required; each chain advances by its own block height.
+\end{enumerate}
+
+We do \emph{not} assume: a single globally synchronised clock, instant mempool visibility across planets, common legal jurisdiction, or uninterrupted communications.
+
+\subsection{Threat model}
+
+The relevant threats are operational rather than cryptanalytic. Preimage resistance and signature unforgeability are inherited from the underlying chains. The threats IPAS must survive are:
+\begin{itemize}
+  \item counterparty abort after one leg is funded;
+  \item relay delay, reordering, or suppression;
+  \item censorship at the network, miner, or relay-operator level;
+  \item local chain reorganisations of lightly-confirmed transactions;
+  \item fee spikes delaying inclusion of claim transactions;
+  \item solar conjunction suspending usable Earth--Mars communication for weeks.
+\end{itemize}
+
+% =============================================================================
+\section{The IPAS Protocol}
+\label{sec:ipas}
+
+\subsection{An HTLC primer for the space audience}
+
+The construction is small enough to state precisely. Let $H(\cdot)$ be a cryptographic hash function (SHA-256 in practice) and let $s$ be a uniformly random 32-byte \emph{preimage}. Let $h = H(s)$ be the \emph{hash lock}. An HTLC on chain $C$ locks an amount $v$ such that it can be spent in one of two ways:
+
+\begin{equation}
+\text{HTLC}(C, v, h, T, pk_{\text{claim}}, pk_{\text{refund}}) :=
+\begin{cases}
+  \text{claim:} & \text{signed by } pk_{\text{claim}} \text{ AND } s \text{ with } H(s) = h \\
+  \text{refund:} & \text{signed by } pk_{\text{refund}} \text{ AND current height} \geq T
+\end{cases}
+\label{eq:htlc}
+\end{equation}
+
+The claim path can be taken at any time, provided the claimer knows $s$. The refund path can be taken only after the chain's block height reaches $T$. Two properties matter for what follows:
+
+\begin{enumerate}
+  \item \textbf{The hash lock is atemporal.} $H(s) = h$ is a property of $s$, not of when or where $s$ was revealed. A preimage broadcast on Mars at time $t$ reaches Earth's Bitcoin network at $t + \tau_{\text{prop}}$, and verifies identically and instantly at every node that eventually receives it. The hash function does not know that $\tau_{\text{prop}}$ is 22 minutes instead of 22 milliseconds.
+
+  \item \textbf{The time lock uses block height, not wall-clock time.} \texttt{OP\_CHECKLOCKTIMEVERIFY} compares the transaction's \texttt{nLockTime} against the embedded $T$, both expressed as block heights on the local chain. Earth's clock and Mars's clock need not agree. Each chain advances at its own pace; the refund becomes available when \emph{that} chain's own tip reaches $T$.
+\end{enumerate}
+
+These two properties mean an HTLC constructed for a 4-hour settlement window works identically whether the counterparties are in the same room or on different planets. The only required adaptation is choosing $T$ appropriately.
+
+\subsection{The swap}
+
+Let Alice be on Mars and hold MARS. Let Bob be on Earth and hold BTC. Alice wants to trade MARS for BTC directed to an address $A_B$ on Earth, which may be her own or a supplier's. Bob wants to acquire MARS directed to an address $A_M$ on Mars, which may be his own or a beneficiary's.
+
+The protocol is identical to a terrestrial atomic swap, up to parameter choice:
+
+\begin{enumerate}
+  \item \textbf{Setup.} Alice generates $s$, computes $h = H(s)$, and shares $h$ with Bob over any channel.
+  \item \textbf{Mars leg.} Alice funds HTLC$_M = $ \text{HTLC}$(C_M, v_M, h, T_M, pk_B, pk_A)$ on Marscoin. Bob can claim $v_M$ on Mars if he reveals $s$; Alice can refund after block height $T_M$ on $C_M$.
+  \item \textbf{Verification.} Bob observes HTLC$_M$ on his local (delayed) copy of $C_M$ and verifies its parameters.
+  \item \textbf{Earth leg.} Bob funds HTLC$_E = $ \text{HTLC}$(C_E, v_E, h, T_E, pk_{A_B}, pk_B)$ on Bitcoin. Alice (or her designated claimant on Earth) can claim $v_E$ if she reveals $s$; Bob can refund after block height $T_E$ on $C_E$.
+  \item \textbf{Claim on Earth.} The Earth-side claimant reveals $s$ and takes $v_E$ to $A_B$.
+  \item \textbf{Claim on Mars.} Bob observes $s$ on his delayed mirror of $C_E$, reconstructs the claim transaction on $C_M$, and takes $v_M$ to $A_M$.
+\end{enumerate}
+
+If Alice never broadcasts HTLC$_M$, nothing happens and Bob loses nothing. If HTLC$_M$ is funded but Bob never funds HTLC$_E$, Alice refunds after $T_M$ and loses only time. If both legs fund and no claim is ever made, both refund and both lose only time. If the Earth claim is made, $s$ becomes public and Bob can always claim on Mars, provided $T_E < T_M$ with an adequate safety gap (Section~\ref{sec:timeouts}).
+
+\subsection{The destination-address construction}
+\label{sec:destination}
+
+Equation~\ref{eq:htlc} specifies that the claim path requires a signature by $pk_{\text{claim}}$. That public key does \emph{not} have to belong to the swap participant. It can belong to anyone the participant designates. This is the single insight that transforms an atomic swap from a trading primitive into a commerce primitive.
+
+Consider six worked examples.
+
+\paragraph{Example 1: A turbopump.}
+A colonist on Mars needs a replacement turbopump manufactured by an Earth supplier. The colonist creates an IPAS offer with $A_B = pk_{\text{supplier}}$. An Earth-based Marscoin investor takes the offer, funding the BTC leg. When the swap completes, the supplier receives BTC directly; the colonist's MARS went to the investor; the investor acquired MARS exposure. Three parties, two chains, two planets, zero intermediaries.
+
+\paragraph{Example 2: A birthday.}
+An Earth-based grandparent wants to send birthday money to a grandchild born on Mars. The grandparent takes a MARS offer, specifying the grandchild's Marscoin address as $A_M$. The grandparent's BTC goes to the maker; the MARS goes to the child. Hawala networks have performed exactly this function for 1{,}200 years using trusted intermediaries \citep{zubrin1995}. IPAS performs it with mathematics.
+
+\paragraph{Example 3: Scientific data.}
+A Mars colony produces a unique isotopic dataset. A Caltech lab wants it. The lab takes an IPAS offer against the colony's Mars-side treasury wallet. On claim, the BTC lands in the colony's Earth-side logistics account; the MARS the lab acquired funds its cross-planet research retainer. The data itself, content-addressed by IPFS hash, is released on preimage reveal --- the \emph{settlement} and the \emph{delivery} share the same cryptographic condition.
+
+\paragraph{Example 4: Emergency medicine.}
+A rare antibiotic manufactured only on Earth is needed urgently on Mars. The Mars habitat uses IPAS to settle payment to the pharma supplier in under a week. Starship cargo delivers the physical goods over the next synodic window. The financial settlement beats the physical shipment by months. The architecture matches the physics.
+
+\paragraph{Example 5: Sovereign treasury funding.}
+A Martian Republic governance treasury issues an IPAS offer of 10{,}000 MARS at the prevailing quote. An Earth-based impact investor takes it. Capital flows to the Martian Republic within the IPAS settlement window --- days, not the years of an institutional grant cycle, and without a NASA or ESA contracting vehicle. The receiving address is the on-chain treasury multisig; the auditability is public.
+
+\paragraph{Example 6: Intellectual property.}
+A Mars-based inventor sells a patent licence to an Earth corporation. BTC lands with the Earth-side patent-firm trust account (the $A_B$ specified in the offer); MARS settles to the inventor's wallet on Mars. The execution of the licence depends on the preimage reveal, which is publicly auditable and timestamped on both chains.
+
+The HTLC itself is indifferent to every one of these. It enforces only: preimage binds both sides, timelocks enforce refunds. What humans choose to do with those mechanics --- pay suppliers, support family, fund research, send medicine, capitalise a republic, license a patent --- is their sovereign decision.
+
+\subsection{Offer propagation}
+
+IPAS offers propagate between planets through whatever gossip infrastructure the Marscoin and Bitcoin ecosystems already use. In the current Marscoin deployment, ElectrumX servers gossip swap offers among peers; for IPAS, this gossip traverses the interplanetary link like any other data. The offer format itself requires no protocol change. A future enhancement might add an \texttt{ipas: true} flag so wallet UIs can display conjunction warnings and orbital-delay estimates.
+
+% =============================================================================
+\section{Timeout Sizing}
+\label{sec:timeouts}
+
+\subsection{The asymmetry rule}
+
+The canonical atomic-swap rule \citep{comit2023} is:
+\begin{equation}
+T_E < T_M,
+\end{equation}
+where $T_E$ is Bob's refund height on $C_E$ (Bob is the second funder) and $T_M$ is Alice's refund height on $C_M$. The party who funds second must be able to refund first. Were the inequality reversed, Alice could observe Bob's claim on Earth, then refund her Mars leg before Bob could relay $s$ back to $C_M$. The rule is not a convention; it is a correctness condition.
+
+Let $\Delta$ denote the safety gap:
+\begin{equation}
+\Delta := \text{wallclock}(T_M) - \text{wallclock}(T_E),
+\label{eq:gap}
+\end{equation}
+that is, the wall-clock time between the Earth refund becoming active and the Mars refund becoming active. $\Delta$ is the window during which Bob can observe $s$ on $C_E$, relay it to his Mars worker, and have the Mars claim transaction confirmed on $C_M$ before Alice's refund race opens.
+
+\subsection{The sizing inequality}
+
+We decompose $\Delta$ into physical, operational, and policy components:
+\begin{equation}
+\Delta \;\geq\; \tau_{\text{confirm},E} + \tau_{\text{prop}} + \tau_{\text{relay}} + \tau_{\text{obs}} + \tau_{\text{claim},M} + \tau_{\text{confirm},M} + \tau_{\text{fee}} + \varepsilon,
+\label{eq:sizing}
+\end{equation}
+where:
+\begin{itemize}
+  \item $\tau_{\text{confirm},E}$ is the Earth-side confirmation buffer (e.g., 6 Bitcoin blocks) before the claim that reveals $s$ is treated as final.
+  \item $\tau_{\text{prop}}$ is the one-way Earth--Mars propagation delay, 3--22 minutes depending on orbital position.
+  \item $\tau_{\text{relay}}$ is additional store-and-forward or scheduled-contact relay delay beyond light-speed.
+  \item $\tau_{\text{obs}}$ is wallet/monitoring-worker polling latency on Mars.
+  \item $\tau_{\text{claim},M}$ is Mars-side claim construction and broadcast time.
+  \item $\tau_{\text{confirm},M}$ is Mars-side inclusion and confirmation buffer (e.g., 30 Marscoin blocks $\approx$ 1 hour).
+  \item $\tau_{\text{fee}}$ is a fee-spike contingency, sized from empirical mempool congestion distributions.
+  \item $\varepsilon$ is a general safety margin.
+\end{itemize}
+
+This decomposition differs from \citet{puente2025} in two ways. First, we include an explicit $\tau_{\text{relay}}$ term distinct from $\tau_{\text{prop}}$, because store-and-forward scheduling can contribute more delay than the physical link itself. Second, we separate $\tau_{\text{fee}}$ from $\varepsilon$, because fee behaviour on Bitcoin is heavy-tailed and demands its own buffer rather than being absorbed into a catch-all margin.
+
+\subsection{Numerical values by orbital regime}
+
+Table~\ref{tab:timeouts} gives recommended $T_M$ and $T_E$ values for four orbital regimes, derived by evaluating Equation~\ref{eq:sizing} at each regime's $\tau_{\text{prop}}$ and adding conservative operational buffers. Marscoin's 123-second target block time is used throughout; Bitcoin's 10-minute target is used throughout.
+
+\begin{table}[ht]
+\centering
+\footnotesize
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Regime & $\tau_{\text{prop}}$ (one-way) & BTC timelock $T_E$ & MARS timelock $T_M$ & Safety gap $\Delta$ \\
+\midrule
+Close approach        & $\sim$3 min    & 48 h  (288 blk)   & 96 h  (2{,}810 blk)  & 48 h \\
+Average distance      & $\sim$13 min   & 72 h  (432 blk)   & 144 h (4{,}215 blk)  & 72 h \\
+Far approach          & $\sim$22 min   & 96 h  (576 blk)   & 192 h (5{,}620 blk)  & 96 h \\
+Conjunction-spanning  & blocked $\approx$14 d & 504 h (3{,}024 blk) & 672 h (19{,}670 blk) & 168 h \\
+\bottomrule
+\end{tabular}
+\caption{Recommended timelock parameters for four Earth--Mars orbital regimes. Block counts assume Bitcoin's 10-minute target block time and Marscoin's 123-second target block time. The safety gap $\Delta$ is wall-clock. The conjunction-spanning regime deliberately exceeds the blackout duration plus a one-week margin, so that neither refund activates during communication loss.}
+\label{tab:timeouts}
+\end{table}
+
+The conjunction-spanning parameters may seem excessive --- nearly a month of capital lockup in the worst case --- but the framing matters. For a civilisation in which a Starship cargo run takes 6--9 months, a 28-day financial settlement is ahead of the logistics chain, not behind it. The architecture matches the physics.
+
+\subsection{A worked example}
+
+A Marscoin mining operator on Mars wants to purchase 100\,kg of specialised carbon-fibre fabric from an Earth supplier for 0.8 BTC, paying in MARS at the prevailing IPAS quote. The current orbital regime is average distance ($\tau_{\text{prop}} \approx$ 13 min). Using Table~\ref{tab:timeouts}:
+
+\begin{itemize}
+  \item Operator (Alice) generates $s$, sets $T_M = $ current Mars tip $+$ 4{,}215 blocks ($\approx$ 144 h), funds HTLC$_M$ with the agreed MARS amount and claim destination $pk_{\text{taker}}$.
+  \item Taker (Bob) observes HTLC$_M$ on his Earth-side Marscoin mirror within approximately 13 minutes of propagation plus any relay scheduling. Verifies parameters, including $T_M$.
+  \item Bob sets $T_E = $ current Earth tip $+$ 432 blocks ($\approx$ 72 h) and funds HTLC$_E$ with 0.8 BTC. Claim destination is the supplier's public key $pk_{\text{supplier}}$, not Alice's.
+  \item Alice (or the supplier; see Section~\ref{sec:destination}) claims HTLC$_E$, revealing $s$ on $C_E$. The supplier's Earth wallet credits 0.8 BTC.
+  \item Bob's Earth-side worker sees $s$ in the claim transaction, relays to his Mars mirror, and claims HTLC$_M$. Bob's Mars wallet credits the MARS.
+\end{itemize}
+
+Typical total elapsed time: under 24 hours. Worst-case elapsed time if Bob's worker misses the reveal but still recovers before the 72-hour Earth refund: under 72 hours. At no point is any party's principal at risk beyond the agreed timelock windows, and at no point is a trusted intermediary required.
+
+% =============================================================================
+\section{Infrastructure: Delayed-Mirror Architecture}
+\label{sec:infra}
+
+\subsection{What each planet must observe}
+
+IPAS requires that each planet can, eventually, observe the other's chain. Neither chain depends on the other for its own consensus. Mars does not mine Bitcoin. Earth does not mine Marscoin. Each planet simply maintains a \emph{delayed mirror} of the other's chain, sufficient to verify claim transactions and extract preimages.
+
+\subsection{A bandwidth budget}
+
+Bitcoin produces approximately 6 blocks per hour, each with a header of 80 bytes and an average full block size of approximately 1.5\,MB. The minimum-viable Earth$\to$Mars feed is block headers only:
+\begin{equation}
+B_{\text{hdr}} = 6 \times 80 \text{ bytes/h} = 480 \text{ bytes/h} \approx 4.7 \text{ KB/d}.
+\end{equation}
+
+This is sufficient for SPV-style inclusion proofs: with header chain and a Merkle branch, a Mars wallet can verify that a specific claim transaction is included in a block without holding the full block. For unambiguous preimage extraction, full blocks are preferable:
+\begin{equation}
+B_{\text{full}} = 6 \times 1.5 \text{ MB/h} \approx 9 \text{ MB/h} \approx 216 \text{ MB/d}.
+\end{equation}
+
+Marscoin, with 123-second target block time and small blocks, requires less still: approximately 2\,MB/d for full blocks. A single-direction Earth--Mars link sized to support a human settlement --- video, telemetry, science payload --- carries data at rates of tens to thousands of megabits per second. Allocating 9\,MB/h of that capacity to Bitcoin block relay is a rounding error on the communication budget. The infrastructure cost of IPAS at the link level is negligible.
+
+\subsection{Conjunction handling}
+
+During conjunction, no data traverses the direct Earth--Mars link. IPAS wallets must be conjunction-aware but not conjunction-dependent. Three behaviours matter:
+
+\begin{enumerate}
+  \item \textbf{Pre-conjunction.} Wallets displaying an IPAS offer within the conjunction-window horizon automatically suggest conjunction-spanning timelocks (Table~\ref{tab:timeouts}, row 4), or decline to construct the offer if the participant prefers to wait out the blackout.
+  \item \textbf{Mid-conjunction.} Both parties' wallets continue monitoring their \emph{own} local chains. If a claim occurs on one chain during blackout, the preimage exists in that chain's data and will be discoverable when communication resumes. The extended timelocks ensure that no refund activates during the blackout window.
+  \item \textbf{Post-conjunction.} When communication resumes, both parties' mirrors resynchronise and pending preimage extractions complete normally.
+\end{enumerate}
+
+Conjunction does not defeat IPAS. It changes its regime.
+
+\subsection{Redundant communication paths}
+
+To mitigate relay censorship, each planet should ingest the other's chain through multiple independent channels: direct deep-space radio, optical links, and store-and-forward through relay satellites or orbital infrastructure. No single relay operator should be able to deny a party's observation of a preimage reveal. This is an operational discipline, not a protocol change; IPAS benefits from the same multi-path communication philosophy NASA already applies to Mars surface assets \citep{nasa2026relay}.
+
+% =============================================================================
+\section{IPAS vs.\ Interplanetary Lightning}
+\label{sec:lightning}
+
+\subsection{What Lightning solves, and what it costs}
+
+\citet{poon2016lightning} introduced Lightning as an off-chain scaling mechanism. A Lightning channel is a two-of-two multisig between two participants, with HTLC updates passed off-chain to encode payment state. Scaling follows: most payments never touch the base chain. \citet{puente2025} proposes extending this architecture to Mars, with light-time-adjusted CLTV margins and proof-of-transit receipts for cross-planetary audit.
+
+Lightning is a remarkable piece of engineering. It is also, eight years after launch, not the payment rail that most Bitcoin users interact with. The empirical adoption gap is not an accident; it reflects real operational costs:
+
+\begin{itemize}
+  \item \textbf{Channel management.} Opening, closing, and rebalancing channels is a continuous operational burden. Channel liquidity must be actively managed on both sides; inbound and outbound capacity do not balance themselves.
+  \item \textbf{Watchtower dependence.} If a counterparty broadcasts an old channel state while the user is offline, the user loses funds unless a watchtower intervenes within the dispute window. Watchtowers are a trusted-party introduction; their business model is still unsettled.
+  \item \textbf{Attack surface.} \citet{harris2020flood} (``Flood \& Loot''), \citet{mizrahi2021griefing} (congestion attacks), and \citet{riard2021time} (time-dilation attacks) document systemic vulnerabilities that do not apply to simple on-chain HTLCs.
+  \item \textbf{Liveness requirement.} Lightning requires participants (or their delegated watchtowers) to be online during dispute windows. The on-chain HTLC requires only that the chain itself stays online.
+\end{itemize}
+
+Every one of these costs becomes worse at interplanetary distance. Time-dilation attacks exploit delayed block propagation; 22-minute light time makes them trivially easier. Flood-and-loot attacks exploit mempool congestion during disputes; Mars-side mempools have no redundant global gossip. Watchtower liveness requires reliable inter-planet connectivity, which is precisely what conjunction removes. Channel rebalancing across the Earth--Mars link requires bidirectional liquidity that no rational operator would provide without onerous spreads.
+
+\subsection{Why on-chain HTLC wins for Mars}
+
+The on-chain IPAS construction avoids every one of these concerns:
+\begin{itemize}
+  \item \textbf{No operator.} There is no Lightning service provider, no hub, no watchtower. There are two parties and two chains.
+  \item \textbf{No channel state.} Each swap is a fresh pair of HTLCs. There is no old state that can be maliciously re-broadcast.
+  \item \textbf{No liveness during dispute.} If a participant goes offline for a week, nothing is lost. Either the preimage has been revealed (in which case the claim can be made up to the refund height) or it has not (in which case both refunds activate).
+  \item \textbf{Public auditability.} Every IPAS swap is fully visible on both chains. The Martian Republic treasury can publish its on-chain swap history and have it verified by any Earth-side observer with a Bitcoin node.
+  \item \textbf{Custody sovereignty.} No third party ever holds both sides' funds. The asymmetric-timelock construction makes principal-level custodianship structurally impossible.
+\end{itemize}
+
+The argument is not that Lightning is bad. The argument is that \emph{for Mars, simpler is safer}. An interplanetary payment system whose correctness depends on off-chain state, cooperative channel closing, watchtower liveness, and sub-dispute-window responsiveness is a payment system whose correctness depends on the absence of conjunction. The on-chain HTLC has no such dependency. A capital lockup of six days at average Earth--Mars distance buys total elimination of every Lightning operational concern.
+
+\subsection{Transparency and sovereignty}
+
+A subtler argument: on-chain HTLCs are \emph{legible}. A researcher, a regulator, or a future Martian historian can read the BTC$\leftrightarrow$MARS exchange history directly from the two chains, with cryptographic certainty that the transactions occurred and were settled atomically. Lightning's off-chain state is, by design, opaque to non-participants. For a civilisation that will eventually need to construct institutions, norms, and economic statistics from scratch, legible settlement is a public good. IPAS is legible by default. Lightning is not.
+
+% =============================================================================
+\section{Economic Implications}
+\label{sec:economics}
+
+\subsection{Interplanetary commerce}
+
+IPAS converts Marscoin from a speculative asset into a functional medium of exchange for Earth--Mars trade. A Mars colony that produces unique goods --- isotopic data, rare-sample spectrometry, manufactured lunar/Martian alloys, intellectual property, tourism vouchers, governance participation rights --- can sell them for Bitcoin directed to Earth-side suppliers. The colonist's MARS balance decreases; the supplier's BTC balance increases; the rate is set by the counterparties themselves, without an exchange listing, a market maker, or a regulatory intermediary.
+
+A concrete near-term scenario: SpaceX or a successor launch provider invoices a Mars habitat for cargo manifest slots. Historically such invoices would be cleared through a US-dollar commercial account. Via IPAS, the Mars habitat can pay the launch provider in BTC directly, settling from MARS held in the habitat treasury. The launch provider never touches MARS; the habitat never touches USD. Each side operates in the medium it is natively comfortable with, and the HTLC bridges them.
+
+\subsection{Remittance}
+
+Earth-to-Mars remittance via IPAS is structurally identical to how hawala networks have operated for 1{,}200 years --- except trustless. A parent on Earth takes a MARS offer with the child's Mars address as $A_M$. The parent pays BTC; the child receives MARS; the maker earns the spread. In hawala, the intermediary is \emph{trusted}. In IPAS, the intermediary is \emph{replaced by an HTLC}. This is what it looks like when a 1{,}200-year-old social institution is reimplemented as a 32-byte hash.
+
+\subsection{Capital formation}
+
+This may be the most consequential use case. Mars colonisation faces a persistent funding problem: government budgets are volatile, private investment demands return, philanthropy does not scale. IPAS introduces a new mechanism.
+
+A Mars colony that has built economic value --- scientific discoveries, mineral extraction rights, manufactured goods, IP portfolios, governance participation rights --- can convert that value into Earth-side purchasing power immediately, without a bank account on Earth, without a wire service, without any terrestrial financial intermediary. It needs only a counterparty willing to trade BTC for MARS. In the reverse direction, Earth-side capital can flow to Mars almost directly: an investor, an institution, or an aid program takes IPAS offers, acquiring MARS that funds Martian governance, infrastructure, or individual colonists' accounts. The capital arrives on Mars as spendable Marscoin within the IPAS settlement window --- days, not quarters.
+
+\subsection{Price discovery}
+
+IPAS offers naturally form a cross-planetary order book. The BTC/MARS exchange rate is set by makers and takers based on their own assessments. Over time, this distributed price discovery produces a market rate for interplanetary trade --- the first such rate in human history, emerging from peer-to-peer transactions rather than institutional proclamation.
+
+There is a historical parallel worth naming. In 1602, Amsterdam Bourse quotes for Dutch East India Company shares produced the world's first liquid secondary market in corporate equity; in 1848, the Chicago Board of Trade grain contracts produced the first standardised commodity futures; each time, a new asset class required a new market form. IPAS is the market form for cross-planetary value. It emerges not from a regulator's designation but from the cryptographic structure of the swap itself.
+
+\subsection{Failure case: why custodial bridges cannot work}
+
+Consider a counterfactual: a centralised BTC/MARS exchange with deposit addresses on Earth and Mars. The exchange promises 1:1 redeemability. A conjunction begins. For 14 days, no audit of the exchange's reserves is possible from either planet. If the exchange is solvent and honest, nothing happens. If it is not --- if it has loaned customer deposits, if it is running fractional reserves, if its Mars-side operator has absconded --- no counterparty can discover this until communication resumes. The FTX collapse of 2022 demonstrated that such concealment is not hypothetical even within a single light-speed boundary. Across conjunction, it is unsurvivable.
+
+IPAS has no such failure mode. There is no exchange, no custody, and no reserve ratio. A pending swap either completed or will refund; no third party's solvency is on the critical path. This is not an advantage. It is the difference between a viable interplanetary financial infrastructure and an inevitable interplanetary financial fraud.
+
+% =============================================================================
+\section{Security, Failure Modes, and Limitations}
+\label{sec:security}
+
+IPAS inherits the security of its constituent HTLCs and the underlying chains. It adds no new cryptographic assumption. It does, however, surface several operational concerns that must be managed.
+
+\paragraph{Monitoring failure.} If a participant's worker fails to observe a preimage reveal in time, the swap completes against them --- the counterparty claims, and the timelock refund closes without recovery. The Mars-side operator of a MARS-holding maker must therefore run redundant monitoring. In practice this is a low-cost operational discipline; the Marscoin wallet's swap engine already implements it for terrestrial swaps \citep{marscoin2026ipas}.
+
+\paragraph{Fee spikes and inclusion races.} Bitcoin's fee market is heavy-tailed. A claim transaction broadcast ``just before timeout'' may not confirm in time. IPAS implementations must reserve fee-spike buffer (captured in $\tau_{\text{fee}}$ in Equation~\ref{eq:sizing}) and support child-pays-for-parent re-broadcasting. This is an extant HTLC problem, not an IPAS-specific one.
+
+\paragraph{Reorg risk.} Treating a redemption as final before adequate confirmation can cause a counterparty to claim against a later-reorged chain state. This is handled by the $\tau_{\text{confirm}}$ terms in Equation~\ref{eq:sizing}; six confirmations on Bitcoin and thirty on Marscoin are conservative defaults that push reorg probability well below $10^{-6}$ \citep{nakamoto2008bitcoin}.
+
+\paragraph{Griefing and liquidity lock-up.} A malicious counterparty can fund one leg and then decline to reveal the preimage, forcing both sides to wait out the timelock for a refund. This is an old HTLC cost, but at interplanetary distance it scales with $T_M$ --- up to 28 days of locked capital in conjunction-spanning mode. Bridge liquidity on this scale will likely be priced accordingly; spreads will reflect the capital cost of time.
+
+\paragraph{Censorship.} Neither IPAS nor any other cryptographic construction prevents relay censorship, miner censorship, or state intervention. Multi-path communication (Section~\ref{sec:infra}) mitigates relay-level censorship; open relay networks and multiple mining pools mitigate miner-level censorship. State-level censorship is a political problem, not a protocol problem.
+
+\paragraph{Off-chain performance.} IPAS settles payment atomically. It does not adjudicate whether the physical cargo arrived on Mars, whether the scientific dataset met its specification, whether the patent licence was lawful in both jurisdictions. These are off-chain disputes requiring contract law, arbitration, or reputation systems. IPAS is the settlement primitive; it is not the entire commercial apparatus.
+
+\paragraph{Scope.} This paper does not provide: a formal proof of optimal timeout policy, a full implementation specification of the offer-propagation format, or a simulation of IPAS under realistic Deep Space Network contact schedules. These are natural follow-ups and are planned for the Marscoin technical report series.
+
+% =============================================================================
+\section{Political Economy}
+\label{sec:politics}
+
+\subsection{Compatibility with multiple sovereignty regimes}
+
+IPAS does not prescribe a political settlement for Earth--Mars monetary relations. It is compatible with at least three regimes:
+
+\begin{enumerate}
+  \item \textbf{Mars-local currency.} Mars maintains Marscoin as its domestic medium and uses IPAS selectively for cross-planet trade, remittance, and capital flow. This is the position of the Marscoin literature since 2014 \citep{lopin2014marscoin}.
+  \item \textbf{Pegged or federated architecture.} Mars uses a locally-issued token representing a peg to Bitcoin or another Earth monetary base, with IPAS bridging the peg. This preserves trust-minimisation at the exchange layer even under federated issuance.
+  \item \textbf{Restricted interchange.} A sovereign-Mars regime \citep{haqqmisra2024} limits or prohibits Earth--Mars currency flow. IPAS remains technically relevant but politically bounded: the mechanism exists, its use is policy-constrained.
+\end{enumerate}
+
+The cryptographic mechanism does not settle the sovereignty question. It changes what becomes technically feasible under whichever regime is chosen.
+
+\subsection{Why local chains won}
+
+The 2013--2014 Marscoin argument for a Mars-local chain rested on three observations, all of which have aged well. First, light-speed delay makes synchronous global consensus across Earth and Mars unviable; any protocol that requires it will fail on planetary separation. Second, a local chain allows a Mars settlement to clear its own economic life without depending on continuous connectivity to Earth. Third, cross-planet transfer is a \emph{less frequent, higher-value} operation and deserves a distinct settlement interface from everyday in-domain transactions. IPAS is the interface that third observation anticipated. It arrived thirteen years later, but the architectural prediction was correct at the time.
+
+\subsection{Content-addressed settlement as a general principle}
+
+The analogy to IPFS \citep{ipfs2014} is more than a naming convention. IPFS retrieves content by hash rather than by server location; IPAS settles value by hash rather than by synchronous ledger state. What travels between Earth and Mars in an IPAS swap is not consensus, not shared state, not continuous mutual observation. It is \emph{evidence}: delayed knowledge that a preimage satisfying a public hash commitment has been revealed on the remote chain. The economic link between domains is keyed to a hash-identified condition that verifies or fails to verify locally.
+
+This is a general design principle for interplanetary infrastructure. Whenever a task can be accomplished by verifiable delayed evidence rather than continuous synchronous coherence, the former is strictly more robust. IPFS showed this for data; IPAS shows it for money. Future interplanetary primitives --- for naming, for identity, for delivery attestation --- will benefit from the same discipline.
+
+% =============================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+The deeper insight of this paper is that HTLCs are accidentally interplanetary. They were designed for a world in which both parties share a planet, operate on chains with sub-second communication, and resolve trust within a terrestrial legal context. But nothing in their construction requires those conditions. The hash does not care about distance. The timelock does not care about latency. The preimage does not degrade in transit. These are properties of mathematics, not of geography.
+
+The Marscoin community in 2013 argued for a local chain running at a cadence matched to Mars; the Bitcoin community in 2013 independently described the HTLC-based atomic swap. Neither community knew it was building half of an interplanetary financial architecture. Thirteen years later, the two halves meet. The first mainnet BTC$\leftrightarrow$MARS swap on 12 April 2026 demonstrates that the integration is not theoretical. IPAS, in the formulation given in this paper, is what falls out when the timelocks are widened to match the link budget of the Earth--Mars corridor.
+
+When a Starship eventually carries \emph{The Seed} --- a bootable image containing the Marscoin node, the Electrum-Mars wallet, and the IPAS swap engine --- to a Mars settlement, the colony arrives with the ability to trade trustlessly with Earth from the moment its equipment powers on. The blockchains on both planets enforce the contracts. The speed of light delivers the preimage. The mathematics guarantees that either both parties receive what they agreed to or neither loses anything.
+
+IPAS. InterPlanetary Atomic Swap. Like IPFS before it, the name states the ambition. Unlike most ambitions in the history of space finance, this one is backed by working code and mainnet transactions.
+
+% =============================================================================
+\section*{Acknowledgements}
+The author thanks the Marscoin Foundation contributors, the Electrum-Mars development team, and the counterparties to the first mainnet BTC$\leftrightarrow$MARS atomic swap of 12 April 2026. This paper was prepared for the Mars Society Convention 2026, University of Southern California, October 22--24, 2026.
+
+% =============================================================================
+\bibliography{references}
+
+\end{document}

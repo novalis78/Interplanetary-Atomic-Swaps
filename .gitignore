@@ -1,0 +1,22 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+
+# Editor backups
+*~
+*.swp
+*.swo
+.DS_Store
+
+# Not this one — keep the PDF in the repo
+!ipas.pdf
