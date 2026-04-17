@@ -19,6 +19,10 @@
 \setlist{nosep,leftmargin=*}
 \usepackage{listings}
 \usepackage{array}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{positioning,arrows.meta,decorations.pathreplacing,calc,patterns}
 
 % ---- Code listing style ----
 \definecolor{codebg}{RGB}{245,245,245}
@@ -78,7 +82,7 @@ The central claim of this paper is that HTLCs are \emph{accidentally interplanet
 We call this construction the \emph{InterPlanetary Atomic Swap}, IPAS. The name deliberately echoes IPFS \citep{ipfs2014}: just as IPFS retrieves content by hash rather than by server location, IPAS \emph{settles} value by hash rather than by synchronous ledger state. In both cases, cryptography overcomes distance.
 
 \paragraph{An existence proof.}
-On 12 April 2026, the Marscoin Foundation completed the first mainnet atomic swap between Bitcoin and Marscoin using terrestrial-parameter HTLCs \citep{marscoin2026firstswap}. The swap employed a 4-hour BTC timelock and an 8-hour MARS timelock, followed the classical asymmetry rule, and settled without intermediaries. IPAS as described in this paper is not a new protocol; it is the same protocol, with the timelocks widened to absorb the Earth--Mars link budget. The work is not prospective cryptography --- it is parameter selection and operational engineering on a primitive that has been proven in production.
+On 12 April 2026, the Marscoin Foundation completed the first mainnet atomic swap between Bitcoin and Marscoin using terrestrial-parameter HTLCs \citep{marscoin2026firstswap}. 104 MARS was exchanged for 0.00003652 BTC at the prevailing quote. The swap used a 4-hour BTC timelock and an 8-hour MARS timelock, followed the classical asymmetry rule, and settled without intermediaries. The open-source Electrum-Mars wallet, v4.4.0-mars, drives the full state machine \citep{marscoin2026electrum}. A refund-path test on 11 April --- in which a counterparty wallet stalled due to a communication bug, the Bitcoin HTLC was left unfunded on the claim side, and the Bitcoin principal was automatically returned to an external wallet after the 4-hour timelock --- independently confirmed that the safety net works even when the happy path fails \citep{marscoin2026firstswap}. IPAS, as described in this paper, is not a new protocol. It is the same protocol, with the timelocks widened to absorb the Earth--Mars link budget. The work is not prospective cryptography; it is parameter selection and operational engineering on a primitive that has been proven in production.
 
 \paragraph{A historical coincidence worth naming.}
 Tier Nolan posted the atomic-swap construction to BitcoinTalk in May 2013. In the same months, a different Bitcoin-adjacent community --- the early Marscoin contributors, the present author among them --- was discussing whether a Mars colony would need its own chain, and specifically whether such a chain should have ``slower blocks for a slower planet'' so that the chain rhythm matched the communication link \citep{lopin2014marscoin}. Neither community knew it was building half of the same mechanism. The Marscoin side specified the \emph{local chain}; the atomic-swap side specified the \emph{bridge}. Thirteen years later, the two halves fit. IPAS is what happens when you put them together.
@@ -238,6 +242,67 @@ The HTLC itself is indifferent to every one of these. It enforces only: preimage
 
 IPAS offers propagate between planets through whatever gossip infrastructure the Marscoin and Bitcoin ecosystems already use. In the current Marscoin deployment, ElectrumX servers gossip swap offers among peers; for IPAS, this gossip traverses the interplanetary link like any other data. The offer format itself requires no protocol change. A future enhancement might add an \texttt{ipas: true} flag so wallet UIs can display conjunction warnings and orbital-delay estimates.
 
+\subsection{The protocol in a single diagram}
+
+Figure~\ref{fig:sequence} summarises the full IPAS exchange as a message-sequence diagram between Mars, the interplanetary link, and Earth. The dashed arrows are cross-planet messages that traverse the light-speed delay $\tau_{\text{prop}}$. The solid arrows are local chain transactions. The only global synchronisation required is the publication of $h$; everything else is driven by each party's independent observation of its local and remote chains.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}[
+    >=Stealth,
+    planetfont/.style={font=\small\bfseries},
+    eventfont/.style={font=\footnotesize},
+    msgfont/.style={font=\scriptsize\itshape},
+    chainline/.style={very thick,gray!50},
+    light/.style={dashed,->,>=Stealth,gray!60!red},
+    local/.style={->,>=Stealth,thick},
+  ]
+
+  % Life lines
+  \node[planetfont] (marsT)  at (1.2,0) {\textsf{Mars (Alice)}};
+  \node[planetfont] (linkT)  at (6.0,0) {\textsf{Interplanetary Link}};
+  \node[planetfont] (earthT) at (10.8,0) {\textsf{Earth (Bob)}};
+
+  \draw[chainline] (marsT)  -- ++(0,-10.2);
+  \draw[chainline] (linkT)  -- ++(0,-10.2);
+  \draw[chainline] (earthT) -- ++(0,-10.2);
+
+  % Step 1
+  \node[eventfont,anchor=west] at (1.4,-0.9) {\textsf{generate $s$, compute $h=H(s)$}};
+  \draw[light] (1.2,-1.3) -- node[msgfont,sloped,above]{share $h$} (10.8,-1.9);
+
+  % Step 2 — Alice funds HTLC_M
+  \node[eventfont,anchor=west] at (1.4,-2.5) {\textsf{fund HTLC$_M$ on $C_M$ ($v_M$, $h$, $T_M$)}};
+  \draw[local] (1.2,-2.9) -- ++(-0.9,0) node[left,msgfont]{\textsf{$C_M$}};
+
+  % Light-cone: Mars event propagates to Earth
+  \draw[light] (1.2,-3.1) -- node[msgfont,sloped,above]{\textsf{HTLC$_M$ observed}} (10.8,-3.7);
+
+  % Step 3 — Bob funds HTLC_E
+  \node[eventfont,anchor=east] at (10.6,-4.3) {\textsf{verify; fund HTLC$_E$ on $C_E$ ($v_E$, $h$, $T_E$)}};
+  \draw[local] (10.8,-4.7) -- ++(0.9,0) node[right,msgfont]{\textsf{$C_E$}};
+
+  % Light-cone back: HTLC_E visible on Mars
+  \draw[light] (10.8,-4.9) -- node[msgfont,sloped,above]{\textsf{HTLC$_E$ observed}} (1.2,-5.5);
+
+  % Step 4 — Alice claims on Earth (via designated claimant A_B)
+  \node[eventfont,anchor=west] at (1.4,-6.1) {\textsf{broadcast claim$(s)\to A_B$}};
+  \draw[light] (1.2,-6.3) -- node[msgfont,sloped,above]{\textsf{claim tx on $C_E$}} (10.8,-6.9);
+  \node[eventfont,anchor=east] at (10.6,-7.1) {\textsf{$A_B$ receives $v_E$ BTC; $s$ now public}};
+
+  % Step 5 — Bob extracts s and claims on Mars
+  \draw[light] (10.8,-7.7) -- node[msgfont,sloped,above]{\textsf{extract $s$ from witness}} (1.2,-8.3);
+  \node[eventfont,anchor=west] at (1.4,-8.7) {\textsf{Bob claims HTLC$_M$ $\to A_M$: $v_M$ MARS}};
+
+  % Timelocks indicator at bottom — text placed inline, not beside brackets
+  \node[msgfont,blue!60!black,anchor=north] at (1.2,-9.6)  {\textsf{refund after $T_M$ on $C_M$}};
+  \node[msgfont,blue!60!black,anchor=north] at (10.8,-9.6) {\textsf{refund after $T_E$ on $C_E$ \;($T_E < T_M$)}};
+
+\end{tikzpicture}
+\caption{IPAS message-sequence diagram. Dashed red arrows are cross-planet messages subject to the light-speed delay $\tau_{\text{prop}}$; solid black arrows are local chain transactions. No wall-clock synchronisation between planets is required. The refund-time asymmetry $T_E < T_M$ guarantees that the second funder (Earth-side Bob) can always refund before the first funder's (Mars-side Alice's) refund race opens.}
+\label{fig:sequence}
+\end{figure}
+
 % =============================================================================
 \section{Timeout Sizing}
 \label{sec:timeouts}
@@ -300,6 +365,67 @@ Conjunction-spanning  & blocked $\approx$14 d & 504 h (3{,}024 blk) & 672 h (19{
 \end{table}
 
 The conjunction-spanning parameters may seem excessive --- nearly a month of capital lockup in the worst case --- but the framing matters. For a civilisation in which a Starship cargo run takes 6--9 months, a 28-day financial settlement is ahead of the logistics chain, not behind it. The architecture matches the physics.
+
+Figure~\ref{fig:conjunction} plots one-way Earth--Mars light-time across a single synodic period (approximately 780 days), with the four orbital regimes of Table~\ref{tab:timeouts} overlaid as horizontal safety-gap bands. The plot makes clear that close-approach parameters (48h BTC timelock) are appropriate only in a narrow window around opposition, while conjunction-spanning parameters (504h BTC timelock) are mandatory for the roughly two-week blackout at superior conjunction. Between these extremes, the 72h and 96h parameters cover the bulk of the synodic cycle.
+
+\begin{figure}[ht]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=14.5cm,
+    height=8cm,
+    xlabel={\textsf{Days through synodic cycle (opposition at day 0)}},
+    ylabel={\textsf{One-way Earth--Mars light delay (min)}},
+    xmin=-390, xmax=510,
+    ymin=0, ymax=26,
+    grid=both,
+    grid style={gray!20},
+    xtick={-390,-260,-130,0,130,260,390},
+    xticklabels={$-390$, $-260$, $-130$, opp., $130$, $260$, $390$},
+    ytick={3,8,13,18,22},
+    every axis plot/.append style={very thick},
+    title style={font=\small\bfseries},
+    title={Light-time over a synodic period, with IPAS orbital regimes},
+    clip=true,
+]
+
+% Shaded bands for regimes (drawn only within plot area due to clip=true)
+\addplot[draw=none,fill=green!20,opacity=0.5,forget plot]
+  coordinates {(-390,3) (390,3) (390,5) (-390,5)} -- cycle;
+\addplot[draw=none,fill=yellow!30,opacity=0.5,forget plot]
+  coordinates {(-390,5) (390,5) (390,17) (-390,17)} -- cycle;
+\addplot[draw=none,fill=orange!40,opacity=0.5,forget plot]
+  coordinates {(-390,17) (390,17) (390,22) (-390,22)} -- cycle;
+\addplot[draw=none,fill=red!35,opacity=0.55,forget plot]
+  coordinates {(-390,22) (390,22) (390,26) (-390,26)} -- cycle;
+
+% Opposition vertical marker
+\draw[thick,green!45!black,dashed] (axis cs:0,0) -- (axis cs:0,22);
+
+% Conjunction vertical markers (at cycle boundaries)
+\draw[thick,red!70!black,dashed] (axis cs:-390,0) -- (axis cs:-390,26);
+\draw[thick,red!70!black,dashed] (axis cs:390,0) -- (axis cs:390,26);
+
+% Light-time curve: minimum (3 min) at opposition (x=0), maximum (22 min) at conjunction (x=+/-390)
+\addplot[domain=-390:390,samples=201,black,very thick]
+  {12.5 - 9.5*cos(deg(2*pi*x/780))};
+
+% Labels placed outside the data region (x > 390), inside clip area
+\node[font=\scriptsize,green!40!black,anchor=west]  at (axis cs:395,4)  {\textsf{48/96 h}};
+\node[font=\scriptsize,olive!60!black,anchor=west]  at (axis cs:395,11) {\textsf{72/144 h}};
+\node[font=\scriptsize,orange!70!black,anchor=west] at (axis cs:395,19) {\textsf{96/192 h}};
+\node[font=\scriptsize,red!70!black,anchor=west]    at (axis cs:395,24) {\textsf{504/672 h}};
+
+% Event annotations placed just above the plot in free space (y > curve max)
+\node[font=\scriptsize,green!35!black,anchor=south] at (axis cs:0,22.3) {\textsf{opposition}};
+\node[font=\scriptsize,red!60!black,anchor=south,rotate=90] at (axis cs:-385,4) {\textsf{conjunction}};
+\node[font=\scriptsize,red!60!black,anchor=south,rotate=90] at (axis cs: 385,4) {\textsf{conjunction}};
+
+\end{axis}
+\end{tikzpicture}
+\caption{One-way Earth--Mars light-time across a single synodic period ($\sim$780 days), approximated as $\tau_{\text{prop}}(t) \approx 12.5 - 9.5\cos(2\pi t / 780)$ minutes, overlaid with the four IPAS orbital regimes from Table~\ref{tab:timeouts}. Dashed green marks opposition (close approach); dashed red marks conjunction at the cycle boundaries, where direct radio communication is blocked for approximately two weeks. The coloured bands indicate the orbital regime in which each parameter set is appropriate (BTC/MARS timelock in hours, right margin); an IPAS wallet can auto-select the correct regime from the current ephemeris.}
+\label{fig:conjunction}
+\end{figure}
 
 \subsection{A worked example}
 
@@ -420,6 +546,61 @@ There is a historical parallel worth naming. In 1602, Amsterdam Bourse quotes fo
 Consider a counterfactual: a centralised BTC/MARS exchange with deposit addresses on Earth and Mars. The exchange promises 1:1 redeemability. A conjunction begins. For 14 days, no audit of the exchange's reserves is possible from either planet. If the exchange is solvent and honest, nothing happens. If it is not --- if it has loaned customer deposits, if it is running fractional reserves, if its Mars-side operator has absconded --- no counterparty can discover this until communication resumes. The FTX collapse of 2022 demonstrated that such concealment is not hypothetical even within a single light-speed boundary. Across conjunction, it is unsurvivable.
 
 IPAS has no such failure mode. There is no exchange, no custody, and no reserve ratio. A pending swap either completed or will refund; no third party's solvency is on the critical path. This is not an advantage. It is the difference between a viable interplanetary financial infrastructure and an inevitable interplanetary financial fraud.
+
+% =============================================================================
+\section{Mainnet Demonstration and Reference Implementation}
+\label{sec:mainnet}
+
+\subsection{The 12 April 2026 swap}
+
+The existence proof underlying this paper is not a thought experiment. On 12 April 2026, a maker-taker pair running the open-source Electrum-Mars wallet (v4.4.0-mars) completed a BTC$\leftrightarrow$MARS atomic swap on mainnet \citep{marscoin2026firstswap}. The parameters were:
+
+\begin{table}[ht]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Notes} \\
+\midrule
+Maker offer            & 104 MARS             & Mars-side, funded HTLC$_M$ first \\
+Taker payment          & 0.00003652 BTC       & Earth-side, counter-funded HTLC$_E$ \\
+BTC timelock $T_E$     & 4 hours              & $\approx$ 24 Bitcoin blocks \\
+MARS timelock $T_M$    & 8 hours              & $\approx$ 234 Marscoin blocks \\
+Safety gap $\Delta$    & 4 hours              & wall-clock \\
+Preimage               & 32-byte random, SHA-256 & generated by maker \\
+Monitoring (BTC)       & \texttt{mempool.space} API & maker-side watcher \\
+Monitoring (MARS)      & local node           & taker-side watcher \\
+Claim path             & witness-data preimage reveal & taker extracts $s$ from BTC claim tx \\
+\bottomrule
+\end{tabular}
+\caption{Parameters of the 12 April 2026 first mainnet BTC$\leftrightarrow$MARS atomic swap.}
+\label{tab:firstswap}
+\end{table}
+
+\subsection{The 11 April refund-path test}
+
+A full end-to-end happy-path swap was not, in fact, the first on-mainnet event. On 11 April 2026 --- one day prior --- an earlier test stalled when a bug in cross-wallet communication of the BTC HTLC address prevented the taker's wallet from making progress. The Bitcoin HTLC was funded but the claim path was never exercised. Four hours later, the refund timelock elapsed and the Bitcoin principal returned automatically to the taker's external wallet (an Exodus wallet) via the refund script path \citep{marscoin2026firstswap}.
+
+This failed test is more valuable for this paper's argument than the happy path. It demonstrates that the \emph{safety net is not theoretical}. Even when the swap engine's state machine cannot complete the trade, no party loses principal. The cryptographic refund path activated exactly as specified by Equation~\ref{eq:htlc}. This is the property that makes IPAS viable across 22-minute light delay and two-week conjunctions: the happy path is nice; the refund path is the reason the construction is safe.
+
+\subsection{Unscheduled stress: the empty-block incident}
+
+The 12 April swap was itself non-trivial. Marscoin miners happened to be producing empty blocks for approximately nine hours during the test window --- a mining infrastructure issue unrelated to the swap system. Marscoin transactions sat in the mempool far longer than the expected $\sim$2 minutes per block. The Electrum-Mars swap engine, designed around a short-confirmation assumption, initially treated the delay as an expiration condition and attempted to abort. A fix was applied mid-test to relax the abort heuristic; the swap completed successfully once the Marscoin transaction finally confirmed \citep{marscoin2026firstswap}.
+
+This is exactly the class of operational hazard that scales into the interplanetary regime. The engineering response --- widen the confirmation buffer, distinguish network delay from contract expiry, and decouple the worker's state transitions from wall-clock assumptions --- is precisely the discipline captured by the $\tau_{\text{confirm}}$ and $\tau_{\text{fee}}$ terms of Equation~\ref{eq:sizing}. The Earth-based implementation already encountered, at small scale, the failure mode that interplanetary deployment will encounter at large scale. Solving it on Earth, in public, with small amounts of money, is the correct way to earn the right to deploy it between planets.
+
+\subsection{Reference implementation}
+
+The full reference implementation is open source at \href{https://github.com/marscoin/electrum-mars}{\texttt{github.com/marscoin/electrum-mars}}; the atomic-swap release is tagged \texttt{v4.4.0-mars} (commit \texttt{cff92e1}) \citep{marscoin2026electrum}. Salient architectural features:
+
+\begin{itemize}
+  \item \textbf{Background SwapWorker.} A dedicated worker drives the HTLC state machine automatically once a swap is initiated, surviving wallet restarts and polling the counterparty chain at fixed intervals.
+  \item \textbf{Order book via ElectrumX relay.} Offers propagate through the existing Marscoin ElectrumX gossip network, with no new protocol added.
+  \item \textbf{Auto-Maker.} A passive market-making mode connects to a price feed, applies a configurable spread, and automatically posts and manages offers. Any wallet can become a miniature decentralised exchange.
+  \item \textbf{Planned Taproot migration.} A future migration to Taproot-based adaptor signatures would hide the HTLC mechanics inside a standard-looking transaction, improving efficiency and privacy.
+\end{itemize}
+
+IPAS requires no change to this implementation beyond parameter selection. Extending the timelocks and adding conjunction-aware UI is a superset of the current v4.4.0-mars release, not a rewrite.
 
 % =============================================================================
 \section{Security, Failure Modes, and Limitations}
